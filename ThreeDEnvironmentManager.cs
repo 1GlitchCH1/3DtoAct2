@@ -1,5 +1,7 @@
 using UnityEngine;
 using DiskCardGame;
+using UnityEngine.SceneManagement;
+using System.Collections;
 
 namespace ThrDtoActTwo
 {
@@ -21,6 +23,8 @@ namespace ThrDtoActTwo
         }
 
         private GameObject currentEnvironment;
+        private Scene loadedCabinScene;
+        private GameObject originalPlayer;
         private Camera mainCamera;
 
         public void CreateThreeDEnvironment(string locationName)
@@ -98,58 +102,176 @@ namespace ThrDtoActTwo
         {
             Debug.Log("[ThrDtoActTwo] Creating Act1-style environment - Starting");
             
-            // Шаг 1: Попытка найти и клонировать объекты из Act 1 (Cabin)
-            GameObject[] allObjects = UnityEngine.Object.FindObjectsOfType<GameObject>();
-            GameObject act1Root = null;
+            // Запускаем корутину для асинхронной загрузки сцены Part1_Cabin
+            StartCoroutine(LoadPart1CabinScene());
+        }
+
+        private IEnumerator LoadPart1CabinScene()
+        {
+            Debug.Log("[ThrDtoActTwo] Loading Part1_Cabin scene additively...");
             
-            // Ищем корневые объекты сцены Act 1
-            foreach (GameObject obj in allObjects)
+            // Загружаем сцену Part1_Cabin аддитивно (не выгружая текущую сцену)
+            AsyncOperation asyncLoad = SceneManager.LoadSceneAsync("Part1_Cabin", LoadSceneMode.Additive);
+            
+            if (asyncLoad == null)
             {
-                // Ищем характерные объекты из Act 1
-                if (obj.name.Contains("Cabin") || obj.name.Contains("GBC_Room") || 
-                    obj.name.Contains("FirstPerson") || obj.name.Contains("Farmhouse"))
+                Debug.LogError("[ThrDtoActTwo] Failed to start loading Part1_Cabin scene!");
+                CreateFallbackEnvironment();
+                yield break;
+            }
+            
+            // Ждём завершения загрузки
+            while (!asyncLoad.isDone)
+            {
+                Debug.Log($"[ThrDtoActTwo] Loading Part1_Cabin... Progress: {asyncLoad.progress * 100}%");
+                yield return null;
+            }
+            
+            Debug.Log("[ThrDtoActTwo] Part1_Cabin scene loaded successfully!");
+            
+            // Получаем загруженную сцену
+            loadedCabinScene = SceneManager.GetSceneByName("Part1_Cabin");
+            
+            if (!loadedCabinScene.IsValid())
+            {
+                Debug.LogError("[ThrDtoActTwo] Loaded Part1_Cabin scene is not valid!");
+                CreateFallbackEnvironment();
+                yield break;
+            }
+            
+            // Получаем все корневые объекты из загруженной сцены
+            GameObject[] rootObjects = loadedCabinScene.GetRootGameObjects();
+            Debug.Log($"[ThrDtoActTwo] Found {rootObjects.Length} root objects in Part1_Cabin scene");
+            
+            // Перемещаем все корневые объекты в наше окружение
+            foreach (GameObject rootObj in rootObjects)
+            {
+                Debug.Log($"[ThrDtoActTwo] Processing root object: {rootObj.name}");
+                
+                // Ищем оригинального игрока из Part1_Cabin
+                if (originalPlayer == null)
                 {
-                    Debug.Log($"[ThrDtoActTwo] Found potential Act1 object: {obj.name} at {obj.transform.position}");
-                    if (act1Root == null && obj.transform.parent == null)
+                    // Проверяем по имени или по наличию компонентов управления
+                    if (rootObj.name.ToLower().Contains("player") || 
+                        rootObj.name == "FirstPersonController" ||
+                        rootObj.GetComponent<CharacterController>() != null)
                     {
-                        act1Root = obj;
+                        originalPlayer = rootObj;
+                        Debug.Log($"[ThrDtoActTwo] ✅ FOUND ORIGINAL PLAYER: {rootObj.name}");
                     }
                 }
+                
+                // Перемещаем объект в нашу иерархию
+                rootObj.transform.SetParent(currentEnvironment.transform);
+                
+                // Сбрасываем позицию и поворот
+                rootObj.transform.localPosition = Vector3.zero;
+                rootObj.transform.localRotation = Quaternion.identity;
+                
+                Debug.Log($"[ThrDtoActTwo] Moved {rootObj.name} to 3D environment");
             }
             
-            // Шаг 2: Если нашли Act 1 объекты - клонируем их
-            if (act1Root != null)
-            {
-                Debug.Log($"[ThrDtoActTwo] Cloning Act1 environment from: {act1Root.name}");
-                GameObject clonedEnvironment = GameObject.Instantiate(act1Root);
-                clonedEnvironment.transform.parent = currentEnvironment.transform;
-                clonedEnvironment.transform.position = Vector3.zero;
-                Debug.Log("[ThrDtoActTwo] Act1 environment cloned successfully");
-            }
-            else
-            {
-                Debug.Log("[ThrDtoActTwo] No Act1 environment found, creating minimal grid-based environment");
-                
-                // Создаём минимальное окружение в стиле Act 1 с сеткой
-                // Пол с текстурой как в Cabin
-                CreateFloor(20, new Color(0.45f, 0.35f, 0.25f)); // Коричневый деревянный пол
-                
-                // Создаём стены вокруг как в Cabin
-                CreateWalls(20, 5);
-                
-                // Базовое освещение как в Cabin (тёплое внутреннее освещение)
-                CreateLighting(new Color(1f, 0.9f, 0.7f), 1.2f);
-            }
+            Debug.Log("[ThrDtoActTwo] All Part1_Cabin objects successfully integrated into 3D environment");
             
-            // Шаг 3: ОБЯЗАТЕЛЬНО добавляем красный куб в центре как маркер
+            // Добавляем маркер для отладки
             GameObject centerMarker = GameObject.CreatePrimitive(PrimitiveType.Cube);
             centerMarker.transform.parent = currentEnvironment.transform;
             centerMarker.transform.position = new Vector3(0, 1, 0);
             centerMarker.transform.localScale = new Vector3(2, 2, 2);
-            centerMarker.GetComponent<Renderer>().material.color = Color.red; // ЯРКО-КРАСНЫЙ
+            centerMarker.GetComponent<Renderer>().material.color = Color.red;
             Debug.Log("[ThrDtoActTwo] RED CUBE marker placed at center (0, 1, 0)");
+        }
+
+        private void CreateFallbackEnvironment()
+        {
+            Debug.Log("[ThrDtoActTwo] Creating fallback environment (primitives)");
             
-            Debug.Log("[ThrDtoActTwo] Act1-style environment creation completed");
+            // Создаём минимальное окружение из примитивов
+            CreateFloor(20, new Color(0.45f, 0.35f, 0.25f));
+            CreateWalls(20, 5);
+            CreateLighting(new Color(1f, 0.9f, 0.7f), 1.2f);
+            
+            // Маркер
+            GameObject centerMarker = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            centerMarker.transform.parent = currentEnvironment.transform;
+            centerMarker.transform.position = new Vector3(0, 1, 0);
+            centerMarker.transform.localScale = new Vector3(2, 2, 2);
+            centerMarker.GetComponent<Renderer>().material.color = Color.yellow;
+            Debug.Log("[ThrDtoActTwo] YELLOW CUBE marker (fallback mode)");
+        }
+
+        /// <summary>
+        /// Возвращает оригинального игрока из Part1_Cabin сцены
+        /// </summary>
+        public GameObject GetOriginalPlayer()
+        {
+            return originalPlayer;
+        }
+
+        /// <summary>
+        /// Настраивает оригинального игрока для использования во втором акте
+        /// Снимает ограничения на движение по сетке
+        /// </summary>
+        public void SetupOriginalPlayer()
+        {
+            if (originalPlayer == null)
+            {
+                Debug.LogWarning("[ThrDtoActTwo] Original player not found!");
+                return;
+            }
+
+            Debug.Log($"[ThrDtoActTwo] Setting up original player: {originalPlayer.name}");
+            
+            // Активируем игрока (на случай если он был отключен)
+            originalPlayer.SetActive(true);
+            
+            // Устанавливаем начальную позицию
+            originalPlayer.transform.position = new Vector3(0, 0, 0);
+            originalPlayer.transform.rotation = Quaternion.identity;
+            
+            // Ищем все компоненты игрока
+            Component[] allComponents = originalPlayer.GetComponents<Component>();
+            Debug.Log($"[ThrDtoActTwo] Player has {allComponents.Length} components:");
+            foreach (Component comp in allComponents)
+            {
+                Debug.Log($"[ThrDtoActTwo]   - {comp.GetType().Name}");
+            }
+            
+            // Ищем компоненты, которые могут ограничивать движение
+            // Отключаем компоненты с "Navigation" или "Grid" в названии
+            MonoBehaviour[] behaviours = originalPlayer.GetComponents<MonoBehaviour>();
+            foreach (MonoBehaviour behaviour in behaviours)
+            {
+                if (behaviour == null) continue;
+                
+                string typeName = behaviour.GetType().Name;
+                
+                // Отключаем компоненты навигации и сетки
+                if (typeName.Contains("Navigation") || 
+                    typeName.Contains("Grid") || 
+                    typeName.Contains("Obstacle") ||
+                    typeName.Contains("NodeGrid") ||
+                    typeName.Contains("PathFind"))
+                {
+                    behaviour.enabled = false;
+                    Debug.Log($"[ThrDtoActTwo] ❌ DISABLED component: {typeName}");
+                }
+            }
+            
+            // Ищем дочерние объекты с ограничителями
+            Transform[] children = originalPlayer.GetComponentsInChildren<Transform>(true);
+            foreach (Transform child in children)
+            {
+                if (child.name.Contains("Bound") || 
+                    child.name.Contains("Limit") || 
+                    child.name.Contains("Collision") ||
+                    child.name.Contains("Grid"))
+                {
+                    Debug.Log($"[ThrDtoActTwo] Found child object: {child.name}");
+                }
+            }
+            
+            Debug.Log($"[ThrDtoActTwo] Original player setup complete");
         }
 
         private void CreateFloor(float size, Color color)
@@ -235,10 +357,22 @@ namespace ThrDtoActTwo
 
         public void DestroyEnvironment()
         {
+            Debug.Log("[ThrDtoActTwo] Destroying 3D environment...");
+            
+            // Уничтожаем объекты окружения
             if (currentEnvironment != null)
             {
                 Destroy(currentEnvironment);
                 currentEnvironment = null;
+                Debug.Log("[ThrDtoActTwo] Environment objects destroyed");
+            }
+            
+            // Выгружаем загруженную сцену Part1_Cabin
+            if (loadedCabinScene.IsValid() && loadedCabinScene.isLoaded)
+            {
+                Debug.Log("[ThrDtoActTwo] Unloading Part1_Cabin scene...");
+                SceneManager.UnloadSceneAsync(loadedCabinScene);
+                Debug.Log("[ThrDtoActTwo] Part1_Cabin scene unloaded");
             }
         }
     }

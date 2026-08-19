@@ -64,33 +64,62 @@ namespace ThrDtoActTwo
 
         private void CreateThreeDPlayer()
         {
-            GameObject player = new GameObject("3DPlayer");
-            player.transform.position = new Vector3(0, 0, 0); // На уровне земли острова
+            Debug.Log("[ThrDtoActTwo] Setting up player...");
+            
+            // Получаем оригинального игрока из Part1_Cabin
+            GameObject player = ThreeDEnvironmentManager.Instance.GetOriginalPlayer();
+            
+            if (player != null)
+            {
+                Debug.Log($"[ThrDtoActTwo] ✅ Using ORIGINAL player from Part1_Cabin: {player.name}");
+                
+                // Настраиваем оригинального игрока
+                ThreeDEnvironmentManager.Instance.SetupOriginalPlayer();
+                
+                // Настраиваем камеру
+                Camera cam = Camera.main;
+                if (cam != null)
+                {
+                    // КРИТИЧНО: Устанавливаем cullingMask чтобы камера видела ВСЕ слои
+                    cam.cullingMask = -1; // -1 = все слои (включая Default layer 0)
+                    Debug.Log($"[ThrDtoActTwo] Camera cullingMask set to see all layers");
+                }
+                
+                Debug.Log($"[ThrDtoActTwo] Original player setup complete at position: {player.transform.position}");
+            }
+            else
+            {
+                Debug.LogError("[ThrDtoActTwo] ❌ Original player NOT FOUND! Creating fallback player...");
+                CreateFallbackPlayer();
+            }
+        }
+        
+        private void CreateFallbackPlayer()
+        {
+            Debug.LogWarning("[ThrDtoActTwo] Creating fallback 3D player (original not found)");
+            
+            GameObject player = new GameObject("3DPlayer_Fallback");
+            player.transform.position = new Vector3(0, 0, 0);
             
             // Добавляем камеру к игроку
             Camera cam = Camera.main;
             if (cam != null)
             {
                 cam.transform.parent = player.transform;
-                cam.transform.localPosition = new Vector3(0, 3f, 0); // Поднимаем выше для лучшего обзора пола и острова
-                cam.transform.localRotation = Quaternion.Euler(-15, 0, 0); // Больше наклон вниз для видимости пола
+                cam.transform.localPosition = new Vector3(0, 3f, 0);
+                cam.transform.localRotation = Quaternion.Euler(-15, 0, 0);
+                cam.cullingMask = -1;
                 
-                // КРИТИЧНО: Устанавливаем cullingMask чтобы камера видела ВСЕ слои
-                cam.cullingMask = -1; // -1 = все слои (включая Default layer 0)
-                
-                Debug.Log($"[ThrDtoActTwo] Camera attached to player");
-                Debug.Log($"[ThrDtoActTwo] Camera localPos: {cam.transform.localPosition}, WORLD pos: {cam.transform.position}");
+                Debug.Log($"[ThrDtoActTwo] Fallback camera attached to player");
             }
             
-            // Добавляем GridMovementController для управления как в Act 1:
-            // W/S - быстрое перемещение по сетке вперёд/назад
-            // A/D - поворот на 90 градусов
+            // Добавляем GridMovementController
             GridMovementController controller = player.AddComponent<GridMovementController>();
-            controller.gridSize = 2f; // Размер клетки 2 метра
-            controller.movementSpeed = 8f; // Скорость перемещения
-            controller.rotationSpeed = 360f; // Быстрый поворот
+            controller.gridSize = 2f;
+            controller.movementSpeed = 8f;
+            controller.rotationSpeed = 360f;
             
-            Debug.Log($"[ThrDtoActTwo] 3D player with GridMovementController created at {player.transform.position}");
+            Debug.Log($"[ThrDtoActTwo] Fallback player with GridMovementController created");
         }
 
         // Выход из 3D режима
